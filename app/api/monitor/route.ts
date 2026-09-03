@@ -6,7 +6,13 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 )
 
-const DEFAULT_TARGETS: typeof TARGETS = []
+interface Target {
+  name: string
+  url: string
+  platform: string
+}
+
+const DEFAULT_TARGETS: Target[] = []
 
 const PILLAR_KEYWORDS = [
   'api', 'authorization', 'idor', 'auth', 'token', 'session', 'oauth', 'sso',
@@ -28,7 +34,7 @@ async function fetchPage(url: string): Promise<string> {
   return res.text()
 }
 
-async function detectChanges(target: typeof TARGETS[0]) {
+async function detectChanges(target: Target) {
   const changes: any[] = []
   try {
     const html = await fetchPage(target.url)
