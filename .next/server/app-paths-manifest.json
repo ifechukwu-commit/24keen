@@ -5,10 +5,11 @@
   "/api/proxy/route": "app/api/proxy/route.js",
   "/api/scan/route": "app/api/scan/route.js",
   "/browser/page": "app/browser/page.js",
+  "/bookmarklet/page": "app/bookmarklet/page.js",
   "/findings/page": "app/findings/page.js",
-  "/monitor/page": "app/monitor/page.js",
   "/oob/page": "app/oob/page.js",
-  "/report/[id]/page": "app/report/[id]/page.js",
   "/page": "app/page.js",
+  "/monitor/page": "app/monitor/page.js",
+  "/report/[id]/page": "app/report/[id]/page.js",
   "/settings/page": "app/settings/page.js"
 }
