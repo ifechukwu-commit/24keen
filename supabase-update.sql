@@ -56,3 +56,20 @@ create table if not exists keen_monitored_programs (
 
 alter table keen_monitored_programs enable row level security;
 create policy "service_only" on keen_monitored_programs using (true) with check (true);
+
+-- Web3 scan jobs
+create table if not exists keen_web3_jobs (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz default now(),
+  started_at timestamptz,
+  completed_at timestamptz,
+  contract_address text,
+  contract_name text,
+  status text default 'pending',
+  signals_count int default 0,
+  results jsonb,
+  error text
+);
+
+alter table keen_web3_jobs enable row level security;
+create policy "service_only" on keen_web3_jobs using (true) with check (true);
