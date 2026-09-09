@@ -43,7 +43,7 @@ Return ONLY valid JSON array. No markdown. No text outside the array.`
 
 export async function POST(req: NextRequest) {
   try {
-    const { code, contractAddress, aiKey, jobId } = await req.json()
+    const { code, contractAddress, aiKey, aiProvider, jobId } = await req.json()
 
     if (!aiKey) return NextResponse.json({ error: 'AI key required' }, { status: 400 })
     if (!code && !contractAddress) return NextResponse.json({ error: 'Provide code or contract address' }, { status: 400 })
@@ -74,25 +74,56 @@ export async function POST(req: NextRequest) {
       await supabase.from('keen_web3_jobs').update({ status: 'running', started_at: new Date().toISOString() }).eq('id', jobId)
     }
 
-    const aiResp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': aiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 8000,
-        temperature: 0,
-        system: SYSTEM_PROMPT,
-        messages: [{
-          role: 'user',
-          content: `Analyze this smart contract. Identify every attack signal. For each one show the exact exploitable chain.\n\nContract: ${contractName}\nAddress: ${contractAddress || 'not provided'}\n\nSource Code:\n${contractCode.slice(0, 100000)}`,
-        }],
-      }),
-      signal: AbortSignal.timeout(120000),
-    })
+    let aiResp: Response
+
+    if (aiProvider === 'gemini') {
+      aiResp = await fetch(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': aiKey,
+          },
+          body: JSON.stringify({
+            systemInstruction: {
+              parts: [{ text: SYSTEM_PROMPT }],
+            },
+            contents: [{
+              role: 'user',
+              parts: [{
+                text: `Analyze this smart contract. Identify every attack signal. For each one show the exact exploitable chain.\n\nContract: ${contractName}\nAddress: ${contractAddress || 'not provided'}\n\nSource Code:\n${contractCode.slice(0, 100000)}`,
+              }],
+            }],
+            generationConfig: {
+              temperature: 0,
+              maxOutputTokens: 8000,
+            },
+          }),
+          signal: AbortSignal.timeout(120000),
+        }
+      )
+    } else {
+      aiResp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': aiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 8000,
+          temperature: 0,
+          system: SYSTEM_PROMPT,
+          messages: [{
+            role: 'user',
+            content: `Analyze this smart contract. Identify every attack signal. For each one show the exact exploitable chain.\n\nContract: ${contractName}\nAddress: ${contractAddress || 'not provided'}\n\nSource Code:\n${contractCode.slice(0, 100000)}`,
+          }],
+        }),
+        signal: AbortSignal.timeout(120000),
+      })
+    }
 
     if (!aiResp.ok) {
       const err = await aiResp.text()
@@ -101,7 +132,9 @@ export async function POST(req: NextRequest) {
     }
 
     const aiData = await aiResp.json()
-    const rawText = aiData.content?.[0]?.text ?? '[]'
+    const rawText = aiProvider === 'gemini'
+      ? aiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]'
+      : aiData.content?.[0]?.text ?? '[]'
 
     let signals: any[] = []
     try {
