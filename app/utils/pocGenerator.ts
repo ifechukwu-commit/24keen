@@ -1,29 +1,16 @@
+
+
 export function generateFoundryPoC(signal: any): string {
   const name = signal.category?.replace(/[^a-zA-Z]/g, '') || 'Exploit'
-
-  // Check if we have enough information
-  const hasAddress = signal.contractAddress && signal.contractAddress !== '0x0000000000000000000000000000000000000000'
-  const hasFunction = signal.functionName && signal.functionName !== 'vulnerableFunction'
-
-  if (!hasAddress || !hasFunction) {
-    return `// ============================================================
-// INSUFFICIENT INFORMATION FOR AUTOMATIC PoC
-// ============================================================
-// To generate a working exploit, provide:
-// - Contract address: ${signal.contractAddress || 'MISSING'}
-// - Function name: ${signal.functionName || 'MISSING'}
-// - Chain/RPC URL: ${signal.chain || 'MISSING'}
-//
-// Once you have these, the PoC will be generated automatically.
-// ============================================================
-`
-  }
-
-  const functionSignature = signal.functionParams
-    ? `function ${signal.functionName}(${signal.functionParams}) external`
-    : `function ${signal.functionName}() external`
-
   const category = signal.category || ''
+
+  const functionSignature = signal.functionName
+    ? `function ${signal.functionName}(${signal.functionParams || ''}) external`
+    : `function vulnerableFunction() external`
+
+  const functionName = signal.functionName || 'vulnerableFunction'
+  const params = signal.functionParams || ''
+
   let attackLogic = ''
   let receiveLogic = ''
   let assertion = ''
@@ -31,20 +18,16 @@ export function generateFoundryPoC(signal: any): string {
   let extraState = ''
   let extraSetup = ''
 
-  // ============================================================
-  // CATEGORY-SPECIFIC EXPLOIT LOGIC
-  // ============================================================
-
   if (category.includes('Reentrancy') || category.includes('reentrancy')) {
     attackLogic = `
     function attack() external {
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     receiveLogic = `
     receive() external payable {
         count++;
         if (count < 5) {
-            I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+            I${name}(target).${functionName}(${params ? '/* params */' : ''});
         }
     }`
     assertion = `assertGt(address(attacker).balance, attackerBalanceBefore, "Reentrancy exploit failed");`
@@ -53,8 +36,7 @@ export function generateFoundryPoC(signal: any): string {
   else if (category.includes('Access Control') || category.includes('IDOR') || category.includes('Authorization')) {
     attackLogic = `
     function exploit() external {
-        // Call unprotected function as attacker
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     assertion = `console.log("Access control bypass executed - check state changes");`
   }
@@ -63,9 +45,7 @@ export function generateFoundryPoC(signal: any): string {
     extraImports = `import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";`
     attackLogic = `
     function exploit() external {
-        // Flash loan to manipulate price
-        // Then swap for profit
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     assertion = `console.log("Oracle manipulation executed - check price impact");`
   }
@@ -73,9 +53,7 @@ export function generateFoundryPoC(signal: any): string {
   else if (category.includes('Signature') || category.includes('Replay')) {
     attackLogic = `
     function exploit() external {
-        // Replay a valid signature
-        // Use previously signed message
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     assertion = `console.log("Signature replay executed - check nonce/state");`
   }
@@ -83,9 +61,7 @@ export function generateFoundryPoC(signal: any): string {
   else if (category.includes('Accounting') || category.includes('Invariant')) {
     attackLogic = `
     function exploit() external {
-        // Break accounting invariant
-        // Exploit rounding or precision loss
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     assertion = `console.log("Invariant violation executed - check balances");`
   }
@@ -93,9 +69,7 @@ export function generateFoundryPoC(signal: any): string {
   else if (category.includes('Rounding') || category.includes('Precision')) {
     attackLogic = `
     function exploit() external {
-        // Trigger precision loss
-        // Use edge-case values
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     assertion = `console.log("Rounding exploit executed - check calculation results");`
   }
@@ -105,12 +79,10 @@ export function generateFoundryPoC(signal: any): string {
     extraState = `
     IERC20 public token;`
     extraSetup = `
-        token = IERC20(0x...); // Set token address`
+        token = IERC20(0x...);`
     attackLogic = `
     function exploit() external {
-        // Use malicious token behavior
-        // Or exploit non-standard ERC20
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     assertion = `console.log("Token integration exploit executed - check balances");`
   }
@@ -118,9 +90,7 @@ export function generateFoundryPoC(signal: any): string {
   else if (category.includes('Unsafe External Call')) {
     attackLogic = `
     function exploit() external {
-        // Trigger unsafe external call
-        // Deploy malicious contract to respond
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     assertion = `console.log("Unsafe external call exploit executed - check state");`
   }
@@ -128,8 +98,7 @@ export function generateFoundryPoC(signal: any): string {
   else if (category.includes('Upgradeability')) {
     attackLogic = `
     function exploit() external {
-        // Upgrade proxy to malicious implementation
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     assertion = `console.log("Upgradeability exploit executed - check implementation address");`
   }
@@ -138,9 +107,7 @@ export function generateFoundryPoC(signal: any): string {
     extraImports = `import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";`
     attackLogic = `
     function exploit() external {
-        // Multi-step economic attack
-        // Flash loan + swap + arbitrage
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     assertion = `console.log("DeFi economic attack executed - check profit");`
   }
@@ -148,9 +115,7 @@ export function generateFoundryPoC(signal: any): string {
   else if (category.includes('DoS') || category.includes('Gas')) {
     attackLogic = `
     function exploit() external {
-        // Exhaust gas or trigger revert
-        // Use unbounded loop or expensive operation
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     assertion = `console.log("DoS exploit executed - check gas usage");`
   }
@@ -158,9 +123,7 @@ export function generateFoundryPoC(signal: any): string {
   else if (category.includes('Secrets') || category.includes('Key Exposure')) {
     attackLogic = `
     function exploit() external {
-        // Use exposed private key or secret
-        // Sign transaction with leaked key
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     assertion = `console.log("Secrets exploit executed - check unauthorized access");`
   }
@@ -168,9 +131,7 @@ export function generateFoundryPoC(signal: any): string {
   else if (category.includes('Cross-Layer') || category.includes('Cross Layer')) {
     attackLogic = `
     function exploit() external {
-        // Cross-layer attack chain
-        // Multiple contracts across layers
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     assertion = `console.log("Cross-layer exploit executed - check multi-contract state");`
   }
@@ -178,41 +139,18 @@ export function generateFoundryPoC(signal: any): string {
   else if (category.includes('Business Logic')) {
     attackLogic = `
     function exploit() external {
-        // Bypass business logic checks
-        // Call functions in wrong order
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     assertion = `console.log("Business logic exploit executed - check state machine");`
   }
 
   else {
-    // Generic fallback
     attackLogic = `
     function exploit() external {
-        I${name}(target).${signal.functionName}(${signal.functionParams ? '/* params */' : ''});
+        I${name}(target).${functionName}(${params ? '/* params */' : ''});
     }`
     assertion = `console.log("${category} exploit executed - verify manually");`
   }
-
-  // ============================================================
-  // RPC URL SELECTION
-  // ============================================================
-
-  const rpcUrl = signal.chain === 'base-sepolia' 
-    ? 'https://sepolia.base.org'
-    : signal.chain === 'base'
-    ? 'https://mainnet.base.org'
-    : signal.chain === 'arbitrum'
-    ? 'https://arb1.arbitrum.io/rpc'
-    : signal.chain === 'optimism'
-    ? 'https://mainnet.optimism.io'
-    : signal.chain === 'polygon'
-    ? 'https://polygon-rpc.com'
-    : 'https://eth.llamarpc.com'
-
-  // ============================================================
-  // BUILD FINAL POC
-  // ============================================================
 
   return `// SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
@@ -221,14 +159,16 @@ import "forge-std/Test.sol";
 import "forge-std/Vm.sol";
 ${extraImports}
 
-// ============================================================
 // SIGNAL: ${signal.title || category.toUpperCase()}
 // SEVERITY: ${signal.severity || 'MEDIUM'}
 // LOCATION: ${signal.location || 'Unknown'}
-// ============================================================
-// ATTACK CHAIN:
-// ${signal.attackChain || 'No attack chain provided'}
-// ============================================================
+// ATTACK CHAIN: ${signal.attackChain || 'No attack chain provided'}
+
+// INSTRUCTIONS:
+// 1. Replace TARGET_ADDRESS with the actual contract address
+// 2. Replace RPC_URL with the correct chain RPC
+// 3. Replace function parameters if needed
+// 4. Run: forge test --match-test testExploit -vvv
 
 interface I${name} {
     ${functionSignature};
@@ -256,14 +196,15 @@ contract Attacker {
 }
 
 contract ${name}ExploitTest is Test {
-    address constant TARGET = ${signal.contractAddress || '0x0000000000000000000000000000000000000000'};
+    address constant TARGET = 0x0000000000000000000000000000000000000000;
+    string constant RPC_URL = "https://eth.llamarpc.com";
+    uint256 constant BLOCK_NUMBER = latest;
     
     Attacker public attacker;
     address public attackerAddr = address(0x1337);
 
     function setUp() public {
-        string memory RPC_URL = "${rpcUrl}";
-        vm.createSelectFork(RPC_URL, ${signal.blockNumber || 'latest'});
+        vm.createSelectFork(RPC_URL, BLOCK_NUMBER);
 
         attacker = new Attacker(TARGET);
         
