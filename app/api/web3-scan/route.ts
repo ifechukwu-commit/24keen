@@ -69,7 +69,6 @@ export async function POST(req: NextRequest) {
 
     if (!contractCode?.trim()) return NextResponse.json({ error: 'No contract code to analyze' }, { status: 400 })
 
-    // Update job status in Supabase
     if (jobId) {
       await supabase.from('keen_web3_jobs').update({ status: 'running', started_at: new Date().toISOString() }).eq('id', jobId)
     }
@@ -103,6 +102,42 @@ export async function POST(req: NextRequest) {
           signal: AbortSignal.timeout(120000),
         }
       )
+    } else if (aiProvider === 'deepseek') {
+      aiResp = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${aiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'deepseek-v4-flash',
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: `Analyze this smart contract. Identify every attack signal. For each one show the exact exploitable chain.\n\nContract: ${contractName}\nAddress: ${contractAddress || 'not provided'}\n\nSource Code:\n${contractCode.slice(0, 100000)}` }
+          ],
+          temperature: 0,
+          max_tokens: 8000,
+        }),
+        signal: AbortSignal.timeout(120000),
+      })
+    } else if (aiProvider === 'groq') {
+      aiResp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${aiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'mixtral-8x7b-32768',
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: `Analyze this smart contract. Identify every attack signal. For each one show the exact exploitable chain.\n\nContract: ${contractName}\nAddress: ${contractAddress || 'not provided'}\n\nSource Code:\n${contractCode.slice(0, 100000)}` }
+          ],
+          temperature: 0,
+          max_tokens: 8000,
+        }),
+        signal: AbortSignal.timeout(120000),
+      })
     } else {
       aiResp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -132,9 +167,15 @@ export async function POST(req: NextRequest) {
     }
 
     const aiData = await aiResp.json()
-    const rawText = aiProvider === 'gemini'
-      ? aiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]'
-      : aiData.content?.[0]?.text ?? '[]'
+    let rawText = '[]'
+
+    if (aiProvider === 'gemini') {
+      rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]'
+    } else if (aiProvider === 'deepseek' || aiProvider === 'groq') {
+      rawText = aiData.choices?.[0]?.message?.content ?? '[]'
+    } else {
+      rawText = aiData.content?.[0]?.text ?? '[]'
+    }
 
     let signals: any[] = []
     try {
@@ -145,7 +186,6 @@ export async function POST(req: NextRequest) {
       signals = []
     }
 
-    // Store results in Supabase
     if (jobId && signals.length > 0) {
       await supabase.from('keen_web3_jobs').update({
         status: 'done',
