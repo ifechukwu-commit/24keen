@@ -1,12 +1,12 @@
-// app/web3/page.tsx
-
 'use client'
-
 import { useState, useEffect } from 'react'
-import { generateFoundryPoC } from '../utils/pocGenerator'
 
-const SMAP: Record<string, string> = { critical: '#cc0000', high: '#dd4400', medium: '#cc7700', low: '#555555' }
-const CONF_COLOR: Record<string, string> = { confirmed: '#22c55e', probable: '#f59e0b', investigate: '#888888' }
+const SMAP: Record<string, string> = {
+  critical: '#cc0000', high: '#dd4400', medium: '#cc7700', low: '#555555'
+}
+const CONF_COLOR: Record<string, string> = {
+  confirmed: '#22c55e', probable: '#f59e0b', investigate: '#888888'
+}
 
 export default function Web3Page() {
   const [inputMode, setInputMode] = useState<'code' | 'address' | 'github'>('code')
@@ -19,7 +19,7 @@ export default function Web3Page() {
   const [loading, setLoading] = useState(false)
   const [fetching, setFetching] = useState(false)
   const [signals, setSignals] = useState<any[]>([])
-  const [selected, setSelected] = useState(null)
+  const [selected, setSelected] = useState<any>(null)
   const [status, setStatus] = useState('')
   const [filterSev, setFilterSev] = useState('all')
   const [contractName, setContractName] = useState('')
@@ -29,28 +29,8 @@ export default function Web3Page() {
   useEffect(() => {
     const k = localStorage.getItem('keen_ai_key')
     if (k) setAiKey(k)
-
     const p = localStorage.getItem('keen_ai_provider')
     if (p) setAiProvider(p as any)
-
-    const savedJobId = localStorage.getItem('keen_web3_job_id')
-
-    if (savedJobId) {
-      fetch('/api/web3-scan?jobId=' + encodeURIComponent(savedJobId))
-        .then(res => res.json())
-        .then(data => {
-          if (data.error) return
-
-          setSignals(data.results || [])
-
-          if (data.contractName && data.contractName !== 'Unknown') {
-            setContractName(data.contractName)
-          }
-
-          setStatus((data.count || 0) + ' saved attack signals loaded.')
-        })
-        .catch(() => {})
-    }
   }, [])
 
   function saveProvider(p: string) {
@@ -59,28 +39,17 @@ export default function Web3Page() {
   }
 
   async function fetchFromGitHub() {
-    if (!githubUrl.trim()) {
-      alert('Enter GitHub repo URL first.')
-      return
-    }
-
+    if (!githubUrl.trim()) { alert('Enter GitHub repo URL first.'); return }
     setFetching(true)
     setStatus('Fetching Solidity files from GitHub...')
-
     try {
       const res = await fetch('/api/github-fetch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          repoUrl: githubUrl,
-          commitHash: commitHash || undefined
-        }),
+        body: JSON.stringify({ repoUrl: githubUrl, commitHash: commitHash || undefined }),
       })
-
       const data = await res.json()
-
       if (data.error) throw new Error(data.error)
-
       setCode(data.code)
       setFetchedFiles(data.files)
       setContractName(data.repo)
@@ -95,26 +64,13 @@ export default function Web3Page() {
   }
 
   async function handleScan() {
-    if (!aiKey) {
-      alert('Add your AI key in Settings first.')
-      return
-    }
-
-    if (inputMode === 'code' && !code.trim()) {
-      alert('Paste or fetch contract code first.')
-      return
-    }
-
-    if (inputMode === 'address' && !address.trim()) {
-      alert('Enter contract address.')
-      return
-    }
-
+    if (!aiKey) { alert('Add your AI key in Settings first.'); return }
+    if (inputMode === 'code' && !code.trim()) { alert('Paste or fetch contract code first.'); return }
+    if (inputMode === 'address' && !address.trim()) { alert('Enter contract address.'); return }
     setLoading(true)
     setSignals([])
     setSelected(null)
     setStatus('Identifying attack signals — ' + aiProvider.toUpperCase() + ' analyzing all vulnerability classes...')
-
     try {
       const res = await fetch('/api/web3-scan', {
         method: 'POST',
@@ -126,64 +82,96 @@ export default function Web3Page() {
           aiProvider,
         }),
       })
-
       const data = await res.json()
-
       if (data.error) throw new Error(data.error)
-
-      if (data.jobId) {
-        localStorage.setItem('keen_web3_job_id', data.jobId)
-      }
-
       setSignals(data.signals || [])
-
-      if (data.contractName && data.contractName !== 'Unknown') {
-        setContractName(data.contractName)
-      }
-
+      if (data.contractName && data.contractName !== 'Unknown') setContractName(data.contractName)
       setStatus(data.count + ' attack signals identified. Review each one before submitting.')
     } catch (e: any) {
       alert('Analysis error: ' + e.message)
       setStatus('')
-    } finally {
-      setLoading(false)
+    } finally { setLoading(false) }
+  }
+
+  function generateFoundryPoC(signal: any): string {
+    return `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "forge-std/Test.sol";
+// Import the vulnerable contract
+// import "../src/YourContract.sol";
+
+// Attacker contract for: ${signal.title}
+contract Attacker_${signal.category?.replace(/[^a-zA-Z]/g, '')} {
+    address public target;
+    bool private attacked;
+
+    constructor(address _target) {
+        target = _target;
     }
+
+    // Entry point for the exploit
+    function exploit() external {
+        // ATTACK CHAIN: ${signal.attackChain || 'See signal details'}
+        // TODO: Implement the attack based on the chain above
+        // EVIDENCE: ${signal.evidence || 'See vulnerable code'}
+    }
+
+    receive() external payable {
+        if (!attacked) {
+            attacked = true;
+            // Re-enter here if this is a reentrancy exploit
+        }
+    }
+}
+
+contract ${signal.category?.replace(/[^a-zA-Z]/g, '') || 'Exploit'}Test is Test {
+    // Replace with actual contract types
+    address public target;
+    address public attacker;
+
+    function setUp() public {
+        // Fork: vm.createSelectFork("mainnet", BLOCK_NUMBER);
+        // Deploy or use existing contract address from scope
+        attacker = address(new Attacker_${signal.category?.replace(/[^a-zA-Z]/g, '')}(target));
+        vm.deal(attacker, 10 ether);
+        vm.label(attacker, "Attacker");
+    }
+
+    function testExploit_${signal.category?.replace(/[^a-zA-Z]/g, '')}() public {
+        uint256 balanceBefore = address(attacker).balance;
+        vm.startPrank(attacker);
+        
+        // Execute the exploit
+        Attacker_${signal.category?.replace(/[^a-zA-Z]/g, '')}(payable(attacker)).exploit();
+        
+        vm.stopPrank();
+        
+        // Assert the attack succeeded
+        // assertGt(address(attacker).balance, balanceBefore, "Exploit failed");
+        
+        // HUMAN VERIFICATION: ${signal.humanVerification || 'Verify manually'}
+    }
+}`
   }
 
   const filtered = signals.filter(s => filterSev === 'all' || s.severity === filterSev)
   const counts: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0 }
-
-  signals.forEach(s => {
-    if (counts[s.severity] !== undefined) counts[s.severity]++
-  })
+  signals.forEach(s => { if (counts[s.severity] !== undefined) counts[s.severity]++ })
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <div style={{ width: 380, borderRight: '1px solid #1e0000', overflow: 'auto', padding: 20, flexShrink: 0 }}>
-        <div style={{ fontSize: 20, fontWeight: 700, color: '#f0f0f0', marginBottom: 4 }}>
-          Web3 Analyzer
-          {contractName && (
-            <div style={{ fontSize: 11, color: '#cc0000', fontWeight: 700, marginBottom: 8 }}>
-              {contractName}
-            </div>
-          )}
-          {fetchedFiles.length > 0 && (
-            <div style={{ fontSize: 10, color: '#444', marginBottom: 8 }}>
-              {fetchedFiles.join(' · ')}
-            </div>
-          )}
-        </div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: '#f0f0f0', marginBottom: 4 }}>Web3 Analyzer</div>
+        {contractName && <div style={{ fontSize: 11, color: '#cc0000', fontWeight: 700, marginBottom: 8 }}>{contractName}</div>}
+        {fetchedFiles.length > 0 && (
+          <div style={{ fontSize: 10, color: '#444', marginBottom: 8 }}>{fetchedFiles.join(' · ')}</div>
+        )}
 
         <div style={{ display: 'flex', gap: 4, marginBottom: 14, flexWrap: 'wrap' }}>
           {(['code', 'address', 'github'] as const).map(m => (
             <button key={m} onClick={() => setInputMode(m)} style={{
-              flex: 1,
-              minWidth: 60,
-              padding: '6px 4px',
-              borderRadius: 6,
-              fontSize: 10,
-              fontWeight: 800,
-              letterSpacing: 0.5,
+              flex: 1, minWidth: 60, padding: '6px 4px', borderRadius: 6, fontSize: 10, fontWeight: 800, letterSpacing: 0.5,
               background: inputMode === m ? '#cc0000' : '#181818',
               color: inputMode === m ? 'white' : '#555',
               border: '1px solid ' + (inputMode === m ? '#cc0000' : '#222'),
@@ -195,37 +183,20 @@ export default function Web3Page() {
 
         {inputMode === 'github' && (
           <>
-            <div style={{ fontSize: 10, fontWeight: 800, color: '#cc0000', letterSpacing: 2, marginBottom: 6 }}>
-              GITHUB REPO URL
-            </div>
-            <input
-              value={githubUrl}
-              onChange={e => setGithubUrl(e.target.value)}
-              placeholder="https://github.com/owner/repo"
-              style={{ marginBottom: 8 }}
-            />
-            <input
-              value={commitHash}
-              onChange={e => setCommitHash(e.target.value)}
-              placeholder="Commit hash or branch (optional, default: main)"
-              style={{ marginBottom: 8 }}
-            />
-            <button
-              className="btn-secondary"
-              onClick={fetchFromGitHub}
-              disabled={fetching}
-              style={{ width: '100%', padding: '8px', fontSize: 11, letterSpacing: 1, marginBottom: 12, opacity: fetching ? 0.6 : 1 }}
-            >
+            <div style={{ fontSize: 10, fontWeight: 800, color: '#cc0000', letterSpacing: 2, marginBottom: 6 }}>GITHUB REPO URL</div>
+            <input value={githubUrl} onChange={e => setGithubUrl(e.target.value)}
+              placeholder="https://github.com/owner/repo" style={{ marginBottom: 8 }} />
+            <input value={commitHash} onChange={e => setCommitHash(e.target.value)}
+              placeholder="Commit hash or branch (optional, default: main)" style={{ marginBottom: 8 }} />
+            <button className="btn-secondary" onClick={fetchFromGitHub} disabled={fetching}
+              style={{ width: '100%', padding: '8px', fontSize: 11, letterSpacing: 1, marginBottom: 12, opacity: fetching ? 0.6 : 1 }}>
               {fetching ? 'FETCHING...' : 'FETCH CONTRACT FILES'}
             </button>
           </>
         )}
 
         {inputMode === 'code' && (
-          <textarea
-            rows={12}
-            value={code}
-            onChange={e => setCode(e.target.value)}
+          <textarea rows={12} value={code} onChange={e => setCode(e.target.value)}
             placeholder={'pragma solidity ^0.8.0;\n\ncontract Vault {\n    // paste full source\n}'}
             style={{ resize: 'vertical', fontSize: 12, lineHeight: 1.6, marginBottom: 12 }}
           />
@@ -233,45 +204,26 @@ export default function Web3Page() {
 
         {inputMode === 'address' && (
           <>
-            <input
-              value={address}
-              onChange={e => setAddress(e.target.value)}
-              placeholder="0x... (verified on Etherscan)"
-              style={{ marginBottom: 8 }}
-            />
-            <div style={{ fontSize: 11, color: '#444', marginBottom: 12 }}>
-              Must be verified on Etherscan. Source fetched automatically.
-            </div>
+            <input value={address} onChange={e => setAddress(e.target.value)}
+              placeholder="0x... (verified on Etherscan)" style={{ marginBottom: 8 }} />
+            <div style={{ fontSize: 11, color: '#444', marginBottom: 12 }}>Must be verified on Etherscan. Source fetched automatically.</div>
           </>
         )}
 
-        <div style={{ fontSize: 10, fontWeight: 800, color: '#cc0000', letterSpacing: 2, marginBottom: 6 }}>
-          AI PROVIDER
-        </div>
-
+        <div style={{ fontSize: 10, fontWeight: 800, color: '#cc0000', letterSpacing: 2, marginBottom: 6 }}>AI PROVIDER</div>
         <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
           {(['groq', 'deepseek', 'anthropic', 'gemini'] as const).map(p => (
             <button key={p} onClick={() => saveProvider(p)} style={{
-              flex: 1,
-              padding: '6px 4px',
-              borderRadius: 6,
-              fontSize: 10,
-              fontWeight: 800,
+              flex: 1, padding: '6px 4px', borderRadius: 6, fontSize: 10, fontWeight: 800,
               background: aiProvider === p ? '#cc0000' : '#181818',
               color: aiProvider === p ? 'white' : '#555',
               border: '1px solid ' + (aiProvider === p ? '#cc0000' : '#222'),
-            }}>
-              {p.toUpperCase()}
-            </button>
+            }}>{p.toUpperCase()}</button>
           ))}
         </div>
 
-        <button
-          className="btn-primary"
-          onClick={handleScan}
-          disabled={loading}
-          style={{ width: '100%', padding: 13, fontSize: 12, letterSpacing: 1, opacity: loading ? 0.6 : 1, marginBottom: 12 }}
-        >
+        <button className="btn-primary" onClick={handleScan} disabled={loading}
+          style={{ width: '100%', padding: 13, fontSize: 12, letterSpacing: 1, opacity: loading ? 0.6 : 1, marginBottom: 12 }}>
           {loading ? 'ANALYZING...' : 'IDENTIFY ATTACK SIGNALS'}
         </button>
 
@@ -290,206 +242,106 @@ export default function Web3Page() {
                 </div>
               ))}
             </div>
-
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 12 }}>
               {['all', 'critical', 'high', 'medium', 'low'].map(s => (
                 <button key={s} onClick={() => setFilterSev(s)} style={{
                   background: filterSev === s ? '#cc0000' : '#181818',
                   color: filterSev === s ? 'white' : '#555',
                   border: '1px solid ' + (filterSev === s ? '#cc0000' : '#222'),
-                  padding: '3px 8px',
-                  borderRadius: 4,
-                  fontSize: 9,
-                  fontWeight: 800,
-                }}>
-                  {s.toUpperCase()}
-                </button>
+                  padding: '3px 8px', borderRadius: 4, fontSize: 9, fontWeight: 800,
+                }}>{s.toUpperCase()}</button>
               ))}
             </div>
-
             {filtered.map((s, i) => (
               <div key={i} onClick={() => { setSelected(s); setShowPoC(false) }} style={{
                 background: selected === s ? '#1a0000' : '#181818',
                 border: '1px solid ' + (selected === s ? '#cc0000' : '#1e0000'),
                 borderLeft: '4px solid ' + (SMAP[s.severity] || '#555'),
-                borderRadius: 8,
-                padding: 10,
-                marginBottom: 6,
-                cursor: 'pointer',
+                borderRadius: 8, padding: 10, marginBottom: 6, cursor: 'pointer',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-                  <span style={{ fontSize: 9, fontWeight: 800, color: SMAP[s.severity] || '#555' }}>
-                    {s.severity?.toUpperCase()}
-                  </span>
-                  <span style={{ fontSize: 9, color: CONF_COLOR[s.confidence] || '#888', fontWeight: 700 }}>
-                    {s.confidence?.toUpperCase()}
-                  </span>
+                  <span style={{ fontSize: 9, fontWeight: 800, color: SMAP[s.severity] || '#555' }}>{s.severity?.toUpperCase()}</span>
+                  <span style={{ fontSize: 9, color: CONF_COLOR[s.confidence] || '#888', fontWeight: 700 }}>{s.confidence?.toUpperCase()}</span>
                   {s.swc && <span style={{ fontSize: 9, color: '#333' }}>SWC-{s.swc}</span>}
                 </div>
-
                 <div style={{ fontSize: 12, fontWeight: 600, color: '#f0f0f0' }}>{s.title}</div>
                 <div style={{ fontSize: 10, color: '#555', marginTop: 2 }}>{s.category}</div>
               </div>
             ))}
           </>
         )}
-
-        {selected && (
-          <div style={{ marginTop: 16, padding: 12, background: '#111', border: '1px solid #1e0000', borderRadius: 8 }}>
-            <div style={{ fontSize: 9, fontWeight: 800, color: '#cc0000', letterSpacing: 2, marginBottom: 8 }}>
-              SUBMIT TO
-            </div>
-
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
-              <span style={{ background: (SMAP[selected.severity] || '#555') + '22', color: SMAP[selected.severity] || '#555', padding: '3px 10px', borderRadius: 4, fontSize: 11, fontWeight: 800 }}>
-                {selected.severity?.toUpperCase()}
-              </span>
-              <span style={{ background: (CONF_COLOR[selected.confidence] || '#888') + '22', color: CONF_COLOR[selected.confidence] || '#888', padding: '3px 10px', borderRadius: 4, fontSize: 11, fontWeight: 800 }}>
-                {selected.confidence?.toUpperCase()}
-              </span>
-              {selected.swc && (
-                <span style={{ fontSize: 11, color: '#444', background: '#181818', padding: '3px 10px', borderRadius: 4, border: '1px solid #222' }}>
-                  SWC-{selected.swc}
-                </span>
-              )}
-              <span style={{ fontSize: 11, color: '#555', marginLeft: 'auto' }}>{selected.category}</span>
-            </div>
-
-            <div style={{ fontSize: 22, fontWeight: 700, color: '#f0f0f0', marginBottom: 6 }}>
-              {selected.title}
-            </div>
-
-            <div style={{ fontSize: 12, color: '#555', marginBottom: 20, fontFamily: 'monospace' }}>
-              {selected.location}
-            </div>
-
-            <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-              <button onClick={() => setShowPoC(false)} style={{
-                flex: 1,
-                padding: '8px',
-                borderRadius: 6,
-                fontSize: 11,
-                fontWeight: 800,
-                letterSpacing: 1,
-                background: !showPoC ? '#cc0000' : '#181818',
-                color: !showPoC ? 'white' : '#555',
-                border: '1px solid ' + (!showPoC ? '#cc0000' : '#222'),
-              }}>
-                SIGNAL REPORT
-              </button>
-
-              <button onClick={() => setShowPoC(true)} style={{
-                flex: 1,
-                padding: '8px',
-                borderRadius: 6,
-                fontSize: 11,
-                fontWeight: 800,
-                letterSpacing: 1,
-                background: showPoC ? '#cc0000' : '#181818',
-                color: showPoC ? 'white' : '#555',
-                border: '1px solid ' + (showPoC ? '#cc0000' : '#222'),
-              }}>
-                FOUNDRY POC
-              </button>
-            </div>
-
-            {!showPoC ? (
-              <>
-                {[
-                  { label: 'ATTACK SIGNAL', val: selected.signal, mono: false },
-                  { label: 'VULNERABLE CODE', val: selected.evidence, mono: true, color: '#ff6666' },
-                  { label: 'ATTACK CHAIN', val: selected.attackChain, mono: false },
-                  { label: 'IMPACT', val: selected.impact, mono: false },
-                  { label: 'HUMAN VERIFICATION REQUIRED', val: selected.humanVerification, mono: false, highlight: true },
-                ].map(({ label, val, mono, color, highlight }) => val && (
-                  <div key={label} style={{ marginBottom: 20 }}>
-                    <div style={{ fontSize: 10, fontWeight: 800, color: highlight ? '#f59e0b' : '#cc0000', letterSpacing: 2, marginBottom: 6 }}>
-                      {label}
-                    </div>
-                    <pre style={{
-                      background: highlight ? '#1a1400' : '#181818',
-                      border: '1px solid ' + (highlight ? '#f59e0b44' : '#1e0000'),
-                      borderRadius: 8,
-                      padding: 12,
-                      fontSize: mono ? 12 : 13,
-                      fontFamily: mono ? 'monospace' : 'inherit',
-                      lineHeight: 1.8,
-                      color: color || '#ccc',
-                      wordBreak: 'break-all',
-                      whiteSpace: 'pre-wrap',
-                      maxHeight: 280,
-                      overflow: 'auto',
-                    }}>
-                      {val}
-                    </pre>
-                  </div>
-                ))}
-
-                <button className="btn-primary" onClick={() => {
-                  const r = `SMART CONTRACT SECURITY FINDING
-
-Title: ${selected.title}
-Severity: ${selected.severity?.toUpperCase()}
-Category: ${selected.category}
-Confidence: ${selected.confidence?.toUpperCase()}
-${selected.swc ? 'SWC: SWC-' + selected.swc : ''}
-Location: ${selected.location}
-
-ATTACK SIGNAL
-${selected.signal}
-
-VULNERABLE CODE
-${selected.evidence}
-
-ATTACK CHAIN
-${selected.attackChain}
-
-IMPACT
-${selected.impact}
-
-HUMAN VERIFICATION REQUIRED
-${selected.humanVerification}`
-
-                  navigator.clipboard.writeText(r).then(() => alert('Report copied.'))
-                }} style={{ width: '100%', padding: 14, fontSize: 13, letterSpacing: 1 }}>
-                  COPY REPORT
-                </button>
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize: 10, fontWeight: 800, color: '#cc0000', letterSpacing: 2, marginBottom: 8 }}>
-                  FOUNDRY POC SKELETON
-                </div>
-
-                <div style={{ fontSize: 12, color: '#555', marginBottom: 12, lineHeight: 1.7 }}>
-                  Copy this test, fill in the contract imports and addresses from the scope, run forge test. If the test passes you have a working exploit proof. Then submit with this as your PoC.
-                </div>
-
-                <pre style={{
-                  background: '#181818',
-                  border: '1px solid #1e0000',
-                  borderRadius: 8,
-                  padding: 16,
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                  lineHeight: 1.7,
-                  color: '#88cc88',
-                  wordBreak: 'break-all',
-                  whiteSpace: 'pre-wrap',
-                  maxHeight: 500,
-                  overflow: 'auto',
-                }}>
-                  {generateFoundryPoC(selected)}
-                </pre>
-
-                <button className="btn-primary" onClick={() => {
-                  navigator.clipboard.writeText(generateFoundryPoC(selected)).then(() => alert('Foundry PoC copied.'))
-                }} style={{ width: '100%', padding: 14, fontSize: 13, letterSpacing: 1, marginTop: 12 }}>
-                  COPY FOUNDRY POC
-                </button>
-              </>
-            )}
+       {selected && (
+        <div style={{ marginTop: 16, padding: 12, background: '#111', border: '1px solid #1e0000', borderRadius: 8 }}>
+          <div style={{ fontSize: 9, fontWeight: 800, color: '#cc0000', letterSpacing: 2, marginBottom: 8 }}>SUBMIT TO</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+            <span style={{ background: (SMAP[selected.severity] || '#555') + '22', color: SMAP[selected.severity] || '#555', padding: '3px 10px', borderRadius: 4, fontSize: 11, fontWeight: 800 }}>{selected.severity?.toUpperCase()}</span>
+            <span style={{ background: (CONF_COLOR[selected.confidence] || '#888') + '22', color: CONF_COLOR[selected.confidence] || '#888', padding: '3px 10px', borderRadius: 4, fontSize: 11, fontWeight: 800 }}>{selected.confidence?.toUpperCase()}</span>
+            {selected.swc && <span style={{ fontSize: 11, color: '#444', background: '#181818', padding: '3px 10px', borderRadius: 4, border: '1px solid #222' }}>SWC-{selected.swc}</span>}
+            <span style={{ fontSize: 11, color: '#555', marginLeft: 'auto' }}>{selected.category}</span>
           </div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: '#f0f0f0', marginBottom: 6 }}>{selected.title}</div>
+          <div style={{ fontSize: 12, color: '#555', marginBottom: 20, fontFamily: 'monospace' }}>{selected.location}</div>
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+            <button onClick={() => setShowPoC(false)} style={{
+              flex: 1, padding: '8px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 1,
+              background: !showPoC ? '#cc0000' : '#181818', color: !showPoC ? 'white' : '#555',
+              border: '1px solid ' + (!showPoC ? '#cc0000' : '#222'),
+            }}>SIGNAL REPORT</button>
+            <button onClick={() => setShowPoC(true)} style={{
+              flex: 1, padding: '8px', borderRadius: 6, fontSize: 11, fontWeight: 800, letterSpacing: 1,
+              background: showPoC ? '#cc0000' : '#181818', color: showPoC ? 'white' : '#555',
+              border: '1px solid ' + (showPoC ? '#cc0000' : '#222'),
+            }}>FOUNDRY POC</button>
+          </div>
+
+          {!showPoC ? (
+            <>
+              {[
+                { label: 'ATTACK SIGNAL', val: selected.signal, mono: false },
+                { label: 'VULNERABLE CODE', val: selected.evidence, mono: true, color: '#ff6666' },
+                { label: 'ATTACK CHAIN', val: selected.attackChain, mono: false },
+                { label: 'IMPACT', val: selected.impact, mono: false },
+                { label: 'HUMAN VERIFICATION REQUIRED', val: selected.humanVerification, mono: false, highlight: true },
+              ].map(({ label, val, mono, color, highlight }) => val && (
+                <div key={label} style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: highlight ? '#f59e0b' : '#cc0000', letterSpacing: 2, marginBottom: 6 }}>{label}</div>
+                  <pre style={{
+                    background: highlight ? '#1a1400' : '#181818',
+                    border: '1px solid ' + (highlight ? '#f59e0b44' : '#1e0000'),
+                    borderRadius: 8, padding: 12, fontSize: mono ? 12 : 13,
+                    fontFamily: mono ? 'monospace' : 'inherit',
+                    lineHeight: 1.8, color: color || '#ccc',
+                    wordBreak: 'break-all', whiteSpace: 'pre-wrap', maxHeight: 280, overflow: 'auto',
+                  }}>{val}</pre>
+                </div>
+              ))}
+              <button className="btn-primary" onClick={() => {
+                const r = `SMART CONTRACT SECURITY FINDING\n\nTitle: ${selected.title}\nSeverity: ${selected.severity?.toUpperCase()}\nCategory: ${selected.category}\nConfidence: ${selected.confidence?.toUpperCase()}\n${selected.swc ? 'SWC: SWC-' + selected.swc : ''}\nLocation: ${selected.location}\n\nATTACK SIGNAL\n${selected.signal}\n\nVULNERABLE CODE\n${selected.evidence}\n\nATTACK CHAIN\n${selected.attackChain}\n\nIMPACT\n${selected.impact}\n\nHUMAN VERIFICATION REQUIRED\n${selected.humanVerification}`
+                navigator.clipboard.writeText(r).then(() => alert('Report copied.'))
+              }} style={{ width: '100%', padding: 14, fontSize: 13, letterSpacing: 1 }}>
+                COPY REPORT
+              </button>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 10, fontWeight: 800, color: '#cc0000', letterSpacing: 2, marginBottom: 8 }}>FOUNDRY POC SKELETON</div>
+              <div style={{ fontSize: 12, color: '#555', marginBottom: 12, lineHeight: 1.7 }}>
+                Copy this test, fill in the contract imports and addresses from the scope, run forge test. If the test passes you have a working exploit proof. Then submit with this as your PoC.
+              </div>
+              <pre style={{
+                background: '#181818', border: '1px solid #1e0000', borderRadius: 8, padding: 16,
+                fontSize: 11, fontFamily: 'monospace', lineHeight: 1.7, color: '#88cc88',
+                wordBreak: 'break-all', whiteSpace: 'pre-wrap', maxHeight: 500, overflow: 'auto',
+              }}>{generateFoundryPoC(selected)}</pre>
+              <button className="btn-primary" onClick={() => {
+                navigator.clipboard.writeText(generateFoundryPoC(selected)).then(() => alert('Foundry PoC copied.'))
+              }} style={{ width: '100%', padding: 14, fontSize: 13, letterSpacing: 1, marginTop: 12 }}>
+                COPY FOUNDRY POC
+              </button>
+            </>
+          )}
+        </div>
         )}
       </div>
     </div>
