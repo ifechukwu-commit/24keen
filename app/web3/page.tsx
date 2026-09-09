@@ -15,7 +15,7 @@ export default function Web3Page() {
   const [githubUrl, setGithubUrl] = useState('')
   const [commitHash, setCommitHash] = useState('')
   const [aiKey, setAiKey] = useState('')
-  const [aiProvider, setAiProvider] = useState<'groq' | 'deepseek' | 'anthropic'>('groq')
+  const [aiProvider, setAiProvider] = useState<'groq' | 'deepseek' | 'anthropic' | 'gemini'>('groq')
   const [loading, setLoading] = useState(false)
   const [fetching, setFetching] = useState(false)
   const [signals, setSignals] = useState<any[]>([])
@@ -212,7 +212,7 @@ contract ${signal.category?.replace(/[^a-zA-Z]/g, '') || 'Exploit'}Test is Test 
 
         <div style={{ fontSize: 10, fontWeight: 800, color: '#cc0000', letterSpacing: 2, marginBottom: 6 }}>AI PROVIDER</div>
         <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
-          {(['groq', 'deepseek', 'anthropic'] as const).map(p => (
+          {(['groq', 'deepseek', 'anthropic', 'gemini'] as const).map(p => (
             <button key={p} onClick={() => saveProvider(p)} style={{
               flex: 1, padding: '6px 4px', borderRadius: 6, fontSize: 10, fontWeight: 800,
               background: aiProvider === p ? '#cc0000' : '#181818',
