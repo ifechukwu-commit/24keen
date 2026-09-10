@@ -41,6 +41,41 @@ Rules:
 
 Return ONLY valid JSON array. No markdown. No text outside the array.`
 
+const OPENROUTER_MODELS = [
+  'deepseek/deepseek-chat:free',
+  'qwen/qwen3-coder:free',
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+]
+
+async function callOpenRouter(aiKey: string, userPrompt: string): Promise<Response> {
+  let lastResp: Response | null = null
+  for (const model of OPENROUTER_MODELS) {
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${aiKey}`,
+        'HTTP-Referer': 'https://24keen.vercel.app',
+        'X-Title': '24keen Web3 Analyzer',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0,
+        max_tokens: 8000,
+      }),
+      signal: AbortSignal.timeout(120000),
+    })
+    if (resp.ok) return resp
+    lastResp = resp
+  }
+  return lastResp as Response
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { code, contractAddress, aiKey, aiProvider, jobId } = await req.json()
@@ -73,6 +108,8 @@ export async function POST(req: NextRequest) {
       await supabase.from('keen_web3_jobs').update({ status: 'running', started_at: new Date().toISOString() }).eq('id', jobId)
     }
 
+    const userPrompt = `Analyze this smart contract. Identify every attack signal. For each one show the exact exploitable chain.\n\nContract: ${contractName}\nAddress: ${contractAddress || 'not provided'}\n\nSource Code:\n${contractCode.slice(0, 100000)}`
+
     let aiResp: Response
 
     if (aiProvider === 'gemini') {
@@ -85,19 +122,9 @@ export async function POST(req: NextRequest) {
             'x-goog-api-key': aiKey,
           },
           body: JSON.stringify({
-            systemInstruction: {
-              parts: [{ text: SYSTEM_PROMPT }],
-            },
-            contents: [{
-              role: 'user',
-              parts: [{
-                text: `Analyze this smart contract. Identify every attack signal. For each one show the exact exploitable chain.\n\nContract: ${contractName}\nAddress: ${contractAddress || 'not provided'}\n\nSource Code:\n${contractCode.slice(0, 100000)}`,
-              }],
-            }],
-            generationConfig: {
-              temperature: 0,
-              maxOutputTokens: 8000,
-            },
+            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+            contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+            generationConfig: { temperature: 0, maxOutputTokens: 8000 },
           }),
           signal: AbortSignal.timeout(120000),
         }
@@ -113,25 +140,7 @@ export async function POST(req: NextRequest) {
           model: 'deepseek-v4-flash',
           messages: [
             { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: `Analyze this smart contract. Identify every attack signal. For each one show the exact exploitable chain.\n\nContract: ${contractName}\nAddress: ${contractAddress || 'not provided'}\n\nSource Code:\n${contractCode.slice(0, 100000)}` }
-          ],
-          temperature: 0,
-          max_tokens: 8000,
-        }),
-        signal: AbortSignal.timeout(120000),
-      })
-    } else if (aiProvider === 'groq') {
-      aiResp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${aiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'mixtral-8x7b-32768',
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: `Analyze this smart contract. Identify every attack signal. For each one show the exact exploitable chain.\n\nContract: ${contractName}\nAddress: ${contractAddress || 'not provided'}\n\nSource Code:\n${contractCode.slice(0, 100000)}` }
+            { role: 'user', content: userPrompt },
           ],
           temperature: 0,
           max_tokens: 8000,
@@ -139,25 +148,8 @@ export async function POST(req: NextRequest) {
         signal: AbortSignal.timeout(120000),
       })
     } else {
-      aiResp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': aiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 8000,
-          temperature: 0,
-          system: SYSTEM_PROMPT,
-          messages: [{
-            role: 'user',
-            content: `Analyze this smart contract. Identify every attack signal. For each one show the exact exploitable chain.\n\nContract: ${contractName}\nAddress: ${contractAddress || 'not provided'}\n\nSource Code:\n${contractCode.slice(0, 100000)}`,
-          }],
-        }),
-        signal: AbortSignal.timeout(120000),
-      })
+      // OpenRouter (default fallback)
+      aiResp = await callOpenRouter(aiKey, userPrompt)
     }
 
     if (!aiResp.ok) {
@@ -171,10 +163,8 @@ export async function POST(req: NextRequest) {
 
     if (aiProvider === 'gemini') {
       rawText = aiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]'
-    } else if (aiProvider === 'deepseek' || aiProvider === 'groq') {
-      rawText = aiData.choices?.[0]?.message?.content ?? '[]'
     } else {
-      rawText = aiData.content?.[0]?.text ?? '[]'
+      rawText = aiData.choices?.[0]?.message?.content ?? '[]'
     }
 
     let signals: any[] = []
