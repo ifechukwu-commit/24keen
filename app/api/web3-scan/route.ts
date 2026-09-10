@@ -43,11 +43,11 @@ Return ONLY valid JSON array. No markdown. No text outside the array.`
 
 const OPENROUTER_MODELS = [
   'deepseek/deepseek-chat:free',
-  'qwen/qwen3-coder:free',
 ]
 
 async function callOpenRouter(aiKey: string, userPrompt: string): Promise<Response> {
   let lastResp: Response | null = null
+
   for (const model of OPENROUTER_MODELS) {
     const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
@@ -66,11 +66,16 @@ async function callOpenRouter(aiKey: string, userPrompt: string): Promise<Respon
         temperature: 0,
         max_tokens: 8000,
       }),
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(60000),
     })
+
     if (resp.ok) return resp
+
+    const errText = await resp.text()
+    console.log(`Model ${model} failed: ${resp.status} - ${errText}`)
     lastResp = resp
   }
+
   return lastResp as Response
 }
 
@@ -146,12 +151,11 @@ export async function POST(req: NextRequest) {
         signal: AbortSignal.timeout(120000),
       })
     } else {
-      // OpenRouter (default fallback)
       aiResp = await callOpenRouter(aiKey, userPrompt)
     }
 
-    if (!aiResp.ok) {
-      const err = await aiResp.text()
+    if (!aiResp || !aiResp.ok) {
+      const err = aiResp ? await aiResp.text() : 'No response from AI provider'
       if (jobId) await supabase.from('keen_web3_jobs').update({ status: 'error', error: err }).eq('id', jobId)
       return NextResponse.json({ error: 'AI error: ' + err }, { status: 500 })
     }
