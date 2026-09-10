@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { generateFoundryPoC } from '../utils/pocGenerator'   // <-- ADD THIS LINE
+import { generateFoundryPoC } from '../utils/pocGenerator'
 
 const SMAP: Record<string, string> = {
   critical: '#cc0000', high: '#dd4400', medium: '#cc7700', low: '#555555'
@@ -16,7 +16,7 @@ export default function Web3Page() {
   const [githubUrl, setGithubUrl] = useState('')
   const [commitHash, setCommitHash] = useState('')
   const [aiKey, setAiKey] = useState('')
-  const [aiProvider, setAiProvider] = useState<'groq' | 'deepseek' | 'anthropic' | 'gemini'>('groq')
+  const [aiProvider, setAiProvider] = useState<'openrouter' | 'deepseek' | 'gemini'>('openrouter')
   const [loading, setLoading] = useState(false)
   const [fetching, setFetching] = useState(false)
   const [signals, setSignals] = useState<any[]>([])
@@ -27,7 +27,6 @@ export default function Web3Page() {
   const [fetchedFiles, setFetchedFiles] = useState<string[]>([])
   const [showPoC, setShowPoC] = useState(false)
 
-  // Load saved signals from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem('keen_signals')
     if (saved) {
@@ -47,7 +46,6 @@ export default function Web3Page() {
     if (p) setAiProvider(p as any)
   }, [])
 
-  // Save signals to localStorage whenever they change
   useEffect(() => {
     if (signals.length > 0) {
       localStorage.setItem('keen_signals', JSON.stringify(signals))
@@ -123,8 +121,6 @@ export default function Web3Page() {
     setStatus('Cleared saved signals.')
   }
 
-  // REMOVE the old generateFoundryPoC function from here (it's now imported)
-
   const filtered = signals.filter(s => filterSev === 'all' || s.severity === filterSev)
   const counts: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0 }
   signals.forEach(s => { if (counts[s.severity] !== undefined) counts[s.severity]++ })
@@ -192,7 +188,7 @@ export default function Web3Page() {
 
         <div style={{ fontSize: 10, fontWeight: 800, color: '#cc0000', letterSpacing: 2, marginBottom: 6 }}>AI PROVIDER</div>
         <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
-          {(['groq', 'deepseek', 'anthropic', 'gemini'] as const).map(p => (
+          {(['openrouter', 'deepseek', 'gemini'] as const).map(p => (
             <button key={p} onClick={() => saveProvider(p)} style={{
               flex: 1, padding: '6px 4px', borderRadius: 6, fontSize: 10, fontWeight: 800,
               background: aiProvider === p ? '#cc0000' : '#181818',
