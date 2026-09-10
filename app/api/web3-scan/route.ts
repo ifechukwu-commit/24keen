@@ -44,8 +44,6 @@ Return ONLY valid JSON array. No markdown. No text outside the array.`
 const OPENROUTER_MODELS = [
   'deepseek/deepseek-chat:free',
   'qwen/qwen3-coder:free',
-  'meta-llama/llama-3.3-70b-instruct:free',
-  'nvidia/nemotron-3-ultra-550b-a55b:free',
 ]
 
 async function callOpenRouter(aiKey: string, userPrompt: string): Promise<Response> {
