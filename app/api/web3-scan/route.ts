@@ -114,7 +114,7 @@ function checkCompleteness(code: string): { complete: boolean; reason?: string; 
     }
   })
 
-  if (missing.length > 3) {
+  if (missing.length > 0) {
     return {
       complete: false,
       reason: `Detected ${missing.length} internal functions that are called but not defined in the pasted code. This usually means the input is a fragment, not a full contract.`,
