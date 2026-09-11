@@ -46,6 +46,133 @@ const OPENROUTER_MODELS = [
   'deepseek/deepseek-chat',
 ]
 
+// ============================================================
+// FEATURE 3: CONTEXT WINDOW WARNING
+// ============================================================
+const MAX_CODE_CHARS = 120000
+
+// ============================================================
+// FEATURE 1: COMPLETENESS CHECK
+// ============================================================
+function checkCompleteness(code: string): { complete: boolean; reason?: string; missing?: string[] } {
+  const defined = new Set<string>()
+  const used = new Set<string>()
+
+  // Extract all identifiers that look like function calls or state variables
+  const identifiers = code.match(/\b([a-zA-Z_][a-zA-Z0-9_]*)\b/g) || []
+
+  // Find function definitions
+  const funcDefs = code.match(/function\s+([a-zA-Z_][a-zA-Z0-9_]*)/g) || []
+  funcDefs.forEach(f => {
+    const name = f.replace(/function\s+/, '')
+    defined.add(name)
+  })
+
+  // Find modifier definitions
+  const modDefs = code.match(/modifier\s+([a-zA-Z_][a-zA-Z0-9_]*)/g) || []
+  modDefs.forEach(m => {
+    const name = m.replace(/modifier\s+/, '')
+    defined.add(name)
+  })
+
+  // Find variable declarations (state + local)
+  const varDefs = code.match(/(?:uint|int|address|bool|string|bytes|mapping|mapping\s*\(|I[A-Z])[a-zA-Z0-9_]*\s+(?:private|public|internal|external|memory|calldata|storage|\s)*([a-zA-Z_][a-zA-Z0-9_]*)/g) || []
+  varDefs.forEach(v => {
+    const match = v.match(/([a-zA-Z_][a-zA-Z0-9_]*)\s*$/)
+    if (match) defined.add(match[1])
+  })
+
+  // Find internal calls to functions that should be defined in the same contract
+  const internalCallPattern = /(?:_[a-zA-Z][a-zA-Z0-9_]*|[a-z][a-zA-Z0-9_]*)\s*\(/g
+  const calls = code.match(internalCallPattern) || []
+  calls.forEach(c => {
+    const name = c.replace(/\s*\($/, '')
+    if (name.startsWith('_') || /^[a-z]/.test(name)) {
+      used.add(name)
+    }
+  })
+
+  // Known safe names (Solidity builtins, common OZ functions)
+  const safe = new Set([
+    'require', 'assert', 'revert', 'emit', 'return', 'if', 'else', 'for', 'while',
+    'transfer', 'transferFrom', 'approve', 'balanceOf', 'totalSupply', 'allowance',
+    'mint', 'burn', 'safeTransfer', 'safeTransferFrom', 'forceApprove',
+    'keccak256', 'abi', 'encode', 'encodePacked', 'decode',
+    'mulDiv', 'add', 'sub', 'mul', 'div', 'mod',
+    'msg', 'sender', 'value', 'data', 'block', 'timestamp', 'number', 'chainid',
+    'address', 'this', 'super', 'payable', 'new', 'delete', 'type',
+    'console', 'log', 'vm', 'prank', 'deal', 'label', 'createSelectFork',
+  ])
+
+  const missing: string[] = []
+  used.forEach(name => {
+    if (!defined.has(name) && !safe.has(name)) {
+      // Only flag if it looks like a custom internal function
+      if (name.startsWith('_') && name.length > 2) {
+        missing.push(name)
+      }
+    }
+  })
+
+  if (missing.length > 3) {
+    return {
+      complete: false,
+      reason: `Detected ${missing.length} internal functions that are called but not defined in the pasted code. This usually means the input is a fragment, not a full contract.`,
+      missing: missing.slice(0, 10),
+    }
+  }
+
+  return { complete: true }
+}
+
+// ============================================================
+// FEATURE 2: GITHUB FULL-FILE FETCH
+// ============================================================
+async function fetchAllSolFilesFromGitHub(repoUrl: string): Promise<{ path: string; content: string }[]> {
+  const url = new URL(repoUrl)
+  const parts = url.pathname.split('/').filter(Boolean)
+  let owner = parts[0]
+  let repo = parts[1]
+  let branch = 'main'
+
+  const treeIndex = parts.indexOf('tree')
+  if (treeIndex !== -1 && parts.length > treeIndex + 1) {
+    branch = parts[treeIndex + 1]
+  }
+
+  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`
+  const resp = await fetch(apiUrl, {
+    headers: {
+      'Accept': 'application/vnd.github.v3+json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+  })
+
+  if (!resp.ok) throw new Error(`GitHub tree fetch failed: ${resp.status}`)
+
+  const data = await resp.json()
+  const solPaths: string[] = (data.tree || [])
+    .filter((item: any) => item.type === 'blob' && item.path.endsWith('.sol'))
+    .map((item: any) => item.path)
+
+  const files: { path: string; content: string }[] = []
+  for (const path of solPaths) {
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`
+    try {
+      const rawResp = await fetch(rawUrl)
+      if (rawResp.ok) {
+        const content = await rawResp.text()
+        files.push({ path, content })
+      }
+    } catch {
+      // skip failed file
+    }
+  }
+
+  return files
+}
+
 async function callOpenRouter(aiKey: string, userPrompt: string): Promise<Response> {
   let lastResp: Response | null = null
 
@@ -82,15 +209,36 @@ async function callOpenRouter(aiKey: string, userPrompt: string): Promise<Respon
 
 export async function POST(req: NextRequest) {
   try {
-    const { code, contractAddress, aiKey, aiProvider, jobId } = await req.json()
+    const { code, contractAddress, githubUrl, aiKey, aiProvider, jobId, assumeComplete } = await req.json()
 
     if (!aiKey) return NextResponse.json({ error: 'AI key required' }, { status: 400 })
-    if (!code && !contractAddress) return NextResponse.json({ error: 'Provide code or contract address' }, { status: 400 })
+    if (!code && !contractAddress && !githubUrl) {
+      return NextResponse.json({ error: 'Provide code, contract address, or GitHub URL' }, { status: 400 })
+    }
 
-    let contractCode = code
+    let contractCode = code || ''
     let contractName = 'Unknown'
+    let fetchedFiles: string[] = []
 
-    if (contractAddress && !code) {
+    // ============================================================
+    // FEATURE 2: GITHUB FULL-FILE FETCH
+    // ============================================================
+    if (githubUrl && !code) {
+      try {
+        const files = await fetchAllSolFilesFromGitHub(githubUrl)
+        if (files.length === 0) {
+          return NextResponse.json({ error: 'No Solidity files found in repository' }, { status: 400 })
+        }
+        contractCode = files.map(f => `// ===== FILE: ${f.path} =====\n${f.content}`).join('\n\n')
+        fetchedFiles = files.map(f => f.path)
+        const repoParts = githubUrl.split('/')
+        contractName = repoParts[repoParts.length - 1] || 'Unknown'
+      } catch (e: any) {
+        return NextResponse.json({ error: 'GitHub fetch failed: ' + e.message }, { status: 500 })
+      }
+    }
+
+    if (contractAddress && !code && !githubUrl) {
       try {
         const url = `https://api.etherscan.io/api?module=contract&action=getsourcecode&address=${contractAddress}`
         const resp = await fetch(url, { signal: AbortSignal.timeout(15000) })
@@ -108,11 +256,37 @@ export async function POST(req: NextRequest) {
 
     if (!contractCode?.trim()) return NextResponse.json({ error: 'No contract code to analyze' }, { status: 400 })
 
+    // ============================================================
+    // FEATURE 3: CONTEXT WINDOW WARNING
+    // ============================================================
+    if (contractCode.length > MAX_CODE_CHARS && !assumeComplete) {
+      return NextResponse.json({
+        error: `Code is ${contractCode.length} characters, which exceeds the ${MAX_CODE_CHARS} character limit. Split it into smaller parts, or enable "Assume Complete" to force the scan.`,
+        codeLength: contractCode.length,
+        limit: MAX_CODE_CHARS,
+        requiresOverride: true,
+      }, { status: 413 })
+    }
+
+    // ============================================================
+    // FEATURE 1: COMPLETENESS CHECK
+    // ============================================================
+    if (!assumeComplete) {
+      const completeness = checkCompleteness(contractCode)
+      if (!completeness.complete) {
+        return NextResponse.json({
+          error: completeness.reason,
+          missingIdentifiers: completeness.missing,
+          requiresOverride: true,
+        }, { status: 422 })
+      }
+    }
+
     if (jobId) {
       await supabase.from('keen_web3_jobs').update({ status: 'running', started_at: new Date().toISOString() }).eq('id', jobId)
     }
 
-    const userPrompt = `Analyze this smart contract. Identify every attack signal. For each one show the exact exploitable chain.\n\nContract: ${contractName}\nAddress: ${contractAddress || 'not provided'}\n\nSource Code:\n${contractCode.slice(0, 100000)}`
+    const userPrompt = `Analyze this smart contract. Identify every attack signal. For each one show the exact exploitable chain.\n\nContract: ${contractName}\nAddress: ${contractAddress || 'not provided'}\n\nSource Code:\n${contractCode.slice(0, MAX_CODE_CHARS)}`
 
     let aiResp: Response
 
@@ -190,7 +364,14 @@ export async function POST(req: NextRequest) {
       await supabase.from('keen_web3_jobs').update({ status: 'done', completed_at: new Date().toISOString(), signals_count: 0 }).eq('id', jobId)
     }
 
-    return NextResponse.json({ ok: true, signals, count: signals.length, contractName })
+    return NextResponse.json({
+      ok: true,
+      signals,
+      count: signals.length,
+      contractName,
+      fetchedFiles,
+      codeLength: contractCode.length,
+    })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
