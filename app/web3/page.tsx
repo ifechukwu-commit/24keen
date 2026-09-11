@@ -26,6 +26,11 @@ export default function Web3Page() {
   const [contractName, setContractName] = useState('')
   const [fetchedFiles, setFetchedFiles] = useState<string[]>([])
   const [showPoC, setShowPoC] = useState(false)
+  // FEATURE 4: Assume Complete toggle
+  const [assumeComplete, setAssumeComplete] = useState(false)
+  // FEATURE 3: Context warning
+  const [contextWarning, setContextWarning] = useState('')
+  const [incompleteWarning, setIncompleteWarning] = useState<{ reason: string; missing: string[] } | null>(null)
 
   useEffect(() => {
     const saved = localStorage.getItem('keen_signals')
@@ -87,25 +92,48 @@ export default function Web3Page() {
     if (!aiKey) { alert('Add your AI key in Settings first.'); return }
     if (inputMode === 'code' && !code.trim()) { alert('Paste or fetch contract code first.'); return }
     if (inputMode === 'address' && !address.trim()) { alert('Enter contract address.'); return }
+    if (inputMode === 'github' && !githubUrl.trim()) { alert('Enter a GitHub URL.'); return }
+
     setLoading(true)
     setSignals([])
     setSelected(null)
+    setContextWarning('')
+    setIncompleteWarning(null)
     setStatus('Identifying attack signals — ' + aiProvider.toUpperCase() + ' analyzing all vulnerability classes...')
+
     try {
       const res = await fetch('/api/web3-scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          code: inputMode !== 'address' ? code : undefined,
+          code: inputMode === 'code' ? code : undefined,
           contractAddress: inputMode === 'address' ? address : undefined,
+          githubUrl: inputMode === 'github' ? githubUrl : undefined,
           aiKey,
           aiProvider,
+          assumeComplete,
         }),
       })
+
       const data = await res.json()
+
+      if (res.status === 413) {
+        setContextWarning(data.error + (data.codeLength ? ` (current: ${data.codeLength} chars)` : ''))
+        setLoading(false)
+        return
+      }
+
+      if (res.status === 422) {
+        setIncompleteWarning({ reason: data.error, missing: data.missingIdentifiers || [] })
+        setLoading(false)
+        return
+      }
+
       if (data.error) throw new Error(data.error)
+
       setSignals(data.signals || [])
       if (data.contractName && data.contractName !== 'Unknown') setContractName(data.contractName)
+      if (data.fetchedFiles) setFetchedFiles(data.fetchedFiles)
       setStatus(data.count + ' attack signals identified. Review each one before submitting.')
     } catch (e: any) {
       alert('Analysis error: ' + e.message)
@@ -162,12 +190,9 @@ export default function Web3Page() {
             <div style={{ fontSize: 10, fontWeight: 800, color: '#cc0000', letterSpacing: 2, marginBottom: 6 }}>GITHUB REPO URL</div>
             <input value={githubUrl} onChange={e => setGithubUrl(e.target.value)}
               placeholder="https://github.com/owner/repo" style={{ marginBottom: 8 }} />
-            <input value={commitHash} onChange={e => setCommitHash(e.target.value)}
-              placeholder="Commit hash or branch (optional, default: main)" style={{ marginBottom: 8 }} />
-            <button className="btn-secondary" onClick={fetchFromGitHub} disabled={fetching}
-              style={{ width: '100%', padding: '8px', fontSize: 11, letterSpacing: 1, marginBottom: 12, opacity: fetching ? 0.6 : 1 }}>
-              {fetching ? 'FETCHING...' : 'FETCH CONTRACT FILES'}
-            </button>
+            <div style={{ fontSize: 11, color: '#444', marginBottom: 12 }}>
+              Scans all .sol files in the repo directly. No manual paste needed.
+            </div>
           </>
         )}
 
@@ -198,10 +223,40 @@ export default function Web3Page() {
           ))}
         </div>
 
+        {/* FEATURE 4: Assume Complete toggle */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, color: '#888', marginBottom: 12, cursor: 'pointer' }}>
+          <input type="checkbox" checked={assumeComplete} onChange={e => setAssumeComplete(e.target.checked)} />
+          Assume code is complete (skip safety checks)
+        </label>
+
         <button className="btn-primary" onClick={handleScan} disabled={loading}
           style={{ width: '100%', padding: 13, fontSize: 12, letterSpacing: 1, opacity: loading ? 0.6 : 1, marginBottom: 12 }}>
           {loading ? 'ANALYZING...' : 'IDENTIFY ATTACK SIGNALS'}
         </button>
+
+        {/* FEATURE 3: Context warning */}
+        {contextWarning && (
+          <div style={{ padding: 10, background: '#1a1400', border: '1px solid #f59e0b55', borderRadius: 8, fontSize: 11, color: '#f59e0b', marginBottom: 12 }}>
+            <strong>CONTEXT TOO LARGE</strong><br />
+            {contextWarning}
+          </div>
+        )}
+
+        {/* FEATURE 1: Incomplete warning */}
+        {incompleteWarning && (
+          <div style={{ padding: 10, background: '#1a0000', border: '1px solid #cc000055', borderRadius: 8, fontSize: 11, color: '#ff6666', marginBottom: 12 }}>
+            <strong>INCOMPLETE CODE</strong><br />
+            {incompleteWarning.reason}
+            {incompleteWarning.missing.length > 0 && (
+              <div style={{ marginTop: 6, fontSize: 10, color: '#aa4444' }}>
+                Missing: {incompleteWarning.missing.join(', ')}
+              </div>
+            )}
+            <div style={{ marginTop: 6, fontSize: 10, color: '#888' }}>
+              Enable "Assume Complete" to force the scan anyway.
+            </div>
+          </div>
+        )}
 
         {status && (
           <div style={{ padding: 10, background: '#111', borderRadius: 8, border: '1px solid #1e0000', fontSize: 11, color: loading || fetching ? '#cc0000' : '#22c55e', textAlign: 'center', marginBottom: 12 }}>
